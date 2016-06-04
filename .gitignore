@@ -2,3 +2,9 @@
 /compiled
 figwheel_server.log
 *.js
+
+pom.xml.asc
+
+pom.xml
+
+pom.xml
