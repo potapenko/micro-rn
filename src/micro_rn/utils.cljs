@@ -11,6 +11,7 @@
  )
 
 (enable-console-print!)
+(set! js/React (js/require "react-native"))
 
 (defn keywordize [ob]
  (if (nil? ob)
