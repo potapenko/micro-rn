@@ -1,4 +1,4 @@
-(ns micro-rn.couchbase-light
+(ns micro-rn.couchbase-lite
   (:refer-clojure :exclude [get post put delete replicate])
   (:require
     [reagent.core :as r :refer [atom]]
