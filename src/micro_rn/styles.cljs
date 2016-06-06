@@ -2,6 +2,7 @@
   (:require [reagent.core :as r :refer [atom]]
             [reagent.impl.component :as ru]))
 
+(enable-console-print!)
 (set! js/React (js/require "react-native"))
 
 (defn create-styles[s]
