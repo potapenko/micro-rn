@@ -12,7 +12,7 @@
 
 (enable-console-print!)
 
-(defn react-ref [] (atom nil))
+(def react-ref (atom nil))
 
 (defn get-react []
   (when-not @react-ref
