@@ -2,7 +2,6 @@
  (:require
    [clojure.string :as string]
    [cljs.core.async :as async :refer [<! >! put! chan timeout]]
-   [reagent.core :as r :refer [atom]]
    [clojure.walk :as walk]
    )
  (:require-macros
