@@ -256,12 +256,7 @@
        (= k :startKey)
        (= k :endKey)
        )
-    (cond
-      (= (boolean v) v) (str v)
-      (and (string? v) (not= (first v) "\"")) (str "\"" v "\"")
-      (number? v) (str "\"" v "\"")
-      (vector? v) (js/JSON.stringify (clj->js v))
-      :else (str v))
+    (js/JSON.stringify (clj->js v))
     (str v))
   )
 
