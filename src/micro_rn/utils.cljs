@@ -177,10 +177,37 @@
 (defn await [promise]
   (let [port (chan)]
     (-> promise
-        (then (fn [res] (put! port [nil res]))
+        (.then (fn [res] (put! port [nil res]))
               (fn [err] (put! port [err nil]))
               ))
 
     port
     )
+  )
+
+(defn fetch
+  ([url] (fetch "GET" url))
+  ([method url] (fetch method url nil))
+  ([method url body]
+   (let [port (chan)]
+     (go
+      (let [credintals (when (re-find #".+:.+@" url) (-> url (string/split "//") (nth 1) (string/split "@") (nth 0)))
+            auth-header (when credintals (str "Basic " (base-64/encodeString credintals)))
+            settings (merge {:method method
+                             :headers (merge (if body
+                                               {"Content-Type" "application/json"}
+                                               {"Accept" "application/json"})
+                                             (when credintals {"Authorization" auth-header}))}
+                            (when body {:body (-> body clj->js js/JSON.stringify)}))]
+        (-> (js/fetch url (clj->js settings))
+            (.then (fn [res]
+                     (.json res)))
+            (.then (fn [res]
+                     (put! port (let [res (keywordize res)
+                                      error-message (:error res)]
+                                  (if error-message [res nil] [nil res])))))
+            (.catch (fn[res] (put! port [(keywordize res) nil])))))
+      )
+     port
+     ))
   )
