@@ -3,6 +3,7 @@
    [clojure.string :as string]
    [cljs.core.async :as async :refer [<! >! put! chan timeout]]
    [clojure.walk :as walk]
+   [goog.crypt.base64 :as base-64]
    )
  (:require-macros
    [cljs.core.async.macros :refer [go go-loop]]
@@ -19,10 +20,32 @@
   @react-ref
   )
 
-(defn keywordize [ob]
+(defn dash-to-camel
+  [s]
+  (map string/capitalize (string/split #"\-" s)))
+
+(defn prepare-db-value
+  [v]
+  (str "\"" v "\"")
+  )
+
+(defn cemelify-keys
+  [ob]
+  (let [f (fn [[k v]] (if (keyword? k) [(dash-to-camel k) v] [k v]))]
+    (walk/postwalk (fn [x] (if (map? x) (into {} (map f x)) x)) ob)))
+
+(defn keywordize
+  [ob]
   (if (nil? ob)
     ob
     (walk/keywordize-keys (js->clj ob)))
+  )
+
+(def prepare-to-clj keywordize)
+
+(defn prepare-to-js
+  [m]
+  (clj->js (cemelify-keys m))
   )
 
 (defn catch-err [fn]
@@ -120,7 +143,8 @@
   ([cb t])
   )
 
-(defn camel-to-dash [s]
+(defn camel-to-dash
+  [s]
   (subs
    (apply str
      (map #(if (re-find #"A-Z" %)
@@ -128,11 +152,8 @@
              %)
           s)) 1))
 
-(defn prepare-db-value [v]
-  (str "\"" v "\"")
-  )
-
-(defn db-key [k]
+(defn db-key
+  [k]
   ;(if (clojure.string/empty? k)
   ;{}
   {:key (prepare-db-value k)}
@@ -149,7 +170,8 @@
          (two-letters (.getUTCDate date))))
   )
 
-(defn format-time [date]
+(defn format-time
+  [date]
   (let[date (if (string? date) (js/Date. date) date)]
     (str (.getUTCFullYear date) "-"
          (two-letters (inc (.getUTCMonth date))) "-"
@@ -174,7 +196,8 @@
    (-> (js/Date.) (.getTime) (/ lifetime) (js/Math.round)))
   )
 
-(defn await [promise]
+(defn await
+  [promise]
   (let [port (chan)]
     (-> promise
         (.then (fn [res] (put! port [nil res]))
@@ -189,24 +212,29 @@
   ([url] (fetch "GET" url))
   ([method url] (fetch method url nil))
   ([method url body]
-   (let [port (chan)]
+   (let [credintals (when (re-find #".+:.+@" url) (-> url (string/split "//") (nth 1) (string/split "@") (nth 0)))
+         auth-header (when credintals (str "Basic " (base-64/encodeString credintals)))
+         headers (merge (if body
+                           {"Content-Type" "application/json"}
+                           {"Accept" "application/json"})
+                         (when credintals {"Authorization" auth-header}))]
+     (fetch method url body headers)
+     )
+   )
+  ([method url body headers]
+   (let [port (chan)
+         settings (merge {:method method
+                          :headers headers}
+                         (when body {:body (-> body clj->js js/JSON.stringify)}))]
      (go
-      (let [credintals (when (re-find #".+:.+@" url) (-> url (string/split "//") (nth 1) (string/split "@") (nth 0)))
-            auth-header (when credintals (str "Basic " (base-64/encodeString credintals)))
-            settings (merge {:method method
-                             :headers (merge (if body
-                                               {"Content-Type" "application/json"}
-                                               {"Accept" "application/json"})
-                                             (when credintals {"Authorization" auth-header}))}
-                            (when body {:body (-> body clj->js js/JSON.stringify)}))]
-        (-> (js/fetch url (clj->js settings))
-            (.then (fn [res]
-                     (.json res)))
-            (.then (fn [res]
-                     (put! port (let [res (keywordize res)
-                                      error-message (:error res)]
-                                  (if error-message [res nil] [nil res])))))
-            (.catch (fn[res] (put! port [(keywordize res) nil])))))
+      (-> (js/fetch url (clj->js settings))
+          (.then (fn [res]
+                   (.json res)))
+          (.then (fn [res]
+                   (put! port (let [res (keywordize res)
+                                    error-message (:error res)]
+                                (if error-message [res nil] [nil res])))))
+          (.catch (fn[res] (put! port [(keywordize res) nil]))))
       )
      port
      ))

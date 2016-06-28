@@ -1,4 +1,4 @@
-(defproject potapenko/micro-rn "1.0.7"
+(defproject potapenko/micro-rn "1.0.8"
   :description "Components for reagent/react-native projects - reagent wrappers, styles, utilites, coucbase-lite REST api helpers"
   :url "http://github.com/potapenko/micro-rn"
   :license {:name "Eclipse Public License"

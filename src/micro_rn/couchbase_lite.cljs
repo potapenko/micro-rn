@@ -31,7 +31,6 @@
   (as-list [this])
   (as-docs [this])
   (as-data-source [this])
-  (then [this cb])
   (get-atom [this])
   (set-filter [this fn])
   (watch [this [atoms]])
@@ -95,156 +94,134 @@
   ([method url] (make-request nil method url nil))
   ([db method url] (make-request db method url nil))
   ([db method url body]
-   (let [credintals (-> url (str/split "//") (nth 1) (str/split "@") (nth 0))
-         auth-header (str "Basic " (base-64/encodeString credintals))
+   (let [json-doc (atom nil)
+         result-atom (atom nil)
          aggregate-info (atom nil)
-         settings (if body
-                    {:method method
-                     :headers {"Accept" "application/json"
-                               "Content-Type" "application/json"
-                               "Authorization" auth-header}
-                     :body (-> body clj->js js/JSON.stringify)}
-                    {:method method
-                     :headers {"Authorization" auth-header}})
+         data-converter (atom (reify IDataConverter (convert [this data] data)))
+         fetch-chan (chan)
+         data-filter (atom (fn[d]true))
+         success-state (atom nil)
+         result-state (atom nil)
+         send-data (fn[]
+                     (put! @messages-queue
+                           (fn[]
+                             (println ">>> make request:" method url body)
+                             ;(js/console.log "settings:" (clj->js settings))
+                             (def t (js/Date.now))
+
+                             (go
+                              (let [[err res] (<! (utils/fetch method url body))]
+                                (println "  [db delay]: " (- (js/Date.now) t) res)
+
+                                (reset! json-doc res)
+                                (reset! success-state (and
+                                                       (nil? err)
+                                                       (let [status (:status @json-doc)]
+                                                         (and
+                                                          (not= status 404)
+                                                          (not= status 403)
+                                                          (not= status 401)
+                                                          ))
+                                                       ))
+
+                                (when (and @success-state @aggregate-info)
+                                   (doseq [[k v] @aggregate-info]
+                                     (assert (keyword? k))
+                                     (let [aggregate-doc
+                                           (fn[doc]
+                                             (let[port (chan)
+                                                  id (k doc)]
+                                               (assert (string? id) (str "Invalid aggreggation param - id is not string: " doc k v))
+                                               (go
+                                                (>! port
+                                                    (assoc doc k
+                                                           (<! (-> db
+                                                                   (document id)
+                                                                   (get)
+                                                                   (aggregate v) <?))))
+                                                )
+                                               port
+                                               )
+
+                                             )]
+                                       (reset! json-doc
+                                               (if (:rows @json-doc)
+                                                 (assoc @json-doc :rows
+                                                        (loop[[d & t] (:rows @json-doc) result []]
+                                                          (if d
+                                                            (recur t (concat [{:doc (<! (aggregate-doc (:doc d)))}] result))
+                                                            result)
+                                                          )
+                                                        )
+                                                 (<! (aggregate-doc @json-doc))
+                                                 )))
+                                     )
+                                   )
+
+                                 (reset! result-state res)
+
+                                 (if @success-state
+                                   (do
+                                     (reset! result-atom (-> @data-converter (convert  @json-doc)))
+                                     (>! fetch-chan @result-atom))
+                                   (do
+                                     (js/console.warn "Error: " method url (clj->js @json-doc))
+                                     (>! fetch-chan (-> @data-converter (convert  false)))
+                                     ))
+
+                                (put! @waiting-queue "ping")
+                                ))
+                             )))
          ]
 
-     (let[json-doc (atom nil)
-          result-atom (atom nil)
-          then-fn (atom (fn[json-doc res]))
-          data-converter (atom (reify IDataConverter (convert [this data] data)))
-          fetch-chan (chan)
-          data-filter (atom (fn[d]true))
-          success-state (atom nil)
-          result-state (atom nil)
-          send-data (fn[]
-                      (put! @messages-queue
-                            (fn[]
-                              (println ">>> make request:" method url body)
-                              ;(js/console.log "settings:" (clj->js settings))
-                              (def t (js/Date.now))
-                              (-> (js/fetch url (clj->js settings))
-                                  (.then (fn[res]
-                                           (.json res)))
-                                  (.then (fn[res]
-                                           (js/console.log "  [] " url)
-                                           (js/console.log "  [db delay]: " (- (js/Date.now) t) res)
+     (send-data)
 
-                                           (reset! json-doc (walk/keywordize-keys (js->clj res)))
-                                           (reset! success-state (and
-                                                                  (nil? (:error @json-doc))
-                                                                  (let[status (:status @json-doc)]
-                                                                    (and
-                                                                     (not= status 404)
-                                                                     (not= status 403)
-                                                                     (not= status 401)
-                                                                     ))
-                                                                  ))
-                                           (reset! result-state res)
-
-                                           ;(js/console.log ">>> success:" @success-state (clj->js @json-doc))
-
-                                           (go
-                                            (when (and @success-state @aggregate-info)
-                                              (doseq [[k v] @aggregate-info]
-                                                (assert (keyword? k))
-                                                (let [aggregate-doc
-                                                      (fn[doc]
-                                                        (let[port (chan)
-                                                             id (k doc)]
-                                                          (assert (string? id) (str "Invalid aggreggation param - id is not string: " doc k v))
-                                                          (go
-                                                           (>! port
-                                                               (assoc doc k
-                                                                      (<! (-> db
-                                                                              (document id)
-                                                                              (get)
-                                                                              (aggregate v) <?))))
-                                                           )
-                                                          port
-                                                          )
-
-                                                        )]
-                                                  (reset! json-doc
-                                                          (if (:rows @json-doc)
-                                                            (assoc @json-doc :rows
-                                                                   (loop[[d & t] (:rows @json-doc) result []]
-                                                                     (if d
-                                                                       (recur t (concat [{:doc (<! (aggregate-doc (:doc d)))}] result))
-                                                                       result)
-                                                                     )
-                                                                   )
-                                                            (<! (aggregate-doc @json-doc))
-                                                            )))
-                                                )
-                                              )
-
-                                            (if @success-state
-                                              (do
-                                                (reset! result-atom (-> @data-converter (convert  @json-doc)))
-                                                (>! fetch-chan @result-atom))
-                                              (do
-                                                (js/console.warn "Error: " method url (clj->js @json-doc))
-                                                (>! fetch-chan (-> @data-converter (convert  false)))
-                                                ))
-
-                                            (@then-fn @json-doc res)
-
-                                            )
-                                           (put! @waiting-queue "ping")
-                                           ))
-                                  (.catch (fn[res] (js/console.error "Couchbase Error:" res) (put! fetch-chan false) (put! @waiting-queue "ping"))))
-                              )))
-          ]
-
-       (send-data)
-
-       (reify IResultBuilder
-         (watch [this atoms] (doseq [x atoms]
-                               (add-watch x :any send-data))
-                this)
-         (refresh [this] (send-data))
-         (as-one-doc
-          [this]
-          (reset! data-converter
-                  (reify IDataConverter
-                    (convert [this data]
-                             (let[res (get-docs-from-view data @data-filter)]
-                               (if (empty? res) false @(-> res (nth 0)))))))
-          (reset! result-atom {})
-          this)
-         (as-list
-          [this]
-          (reset! data-converter (reify IDataConverter (convert [this data] (map (fn[e] @e) (get-docs-from-view data @data-filter)))))
-          (reset! result-atom (convert @data-converter []))
-          this)
-         (set-filter [this df] (reset! data-filter df) this)
-         (as-docs
-          [this]
-          (reset! data-converter (reify IDataConverter (convert [this data] (get-docs-from-view data @data-filter))))
-          (reset! result-atom (convert @data-converter []))
-          this)
-         (aggregate
-          [this info]
-          (when-not (nil? info)
-            (when (or (map? info) (string? info) (keyword? info))
-              (reset! aggregate-info
-                      (if (map? info)
-                        info (assoc {} (keyword (name info)) nil)))))
-          this)
-         (as-data-source
-          [this]
-          (reset! data-converter (reify IDataConverter (convert [this data] (create-list-model data @data-filter))))
-          (reset! result-atom (convert @data-converter []))
-          this)
-         (then [this cb] (reset! then-fn cb) this)
-         (success [this] @success-state)
-         (result [this] @result-state)
-         (json [this] @json-doc)
-         (get-atom [this] result-atom)
-         (<? [this] fetch-chan)
-         )
+     (reify IResultBuilder
+       (watch [this atoms] (doseq [x atoms]
+                             (add-watch x :any send-data))
+              this)
+       (refresh [this] (send-data))
+       (as-one-doc
+        [this]
+        (reset! data-converter
+                (reify IDataConverter
+                  (convert [this data]
+                           (let[res (get-docs-from-view data @data-filter)]
+                             (if (empty? res) false @(-> res (nth 0)))))))
+        (reset! result-atom {})
+        this)
+       (as-list
+        [this]
+        (reset! data-converter (reify IDataConverter (convert [this data] (map (fn[e] @e) (get-docs-from-view data @data-filter)))))
+        (reset! result-atom (convert @data-converter []))
+        this)
+       (set-filter [this df] (reset! data-filter df) this)
+       (as-docs
+        [this]
+        (reset! data-converter (reify IDataConverter (convert [this data] (get-docs-from-view data @data-filter))))
+        (reset! result-atom (convert @data-converter []))
+        this)
+       (aggregate
+        [this info]
+        (when-not (nil? info)
+          (when (or (map? info) (string? info) (keyword? info))
+            (reset! aggregate-info
+                    (if (map? info)
+                      info (assoc {} (keyword (name info)) nil)))))
+        this)
+       (as-data-source
+        [this]
+        (reset! data-converter (reify IDataConverter (convert [this data] (create-list-model data @data-filter))))
+        (reset! result-atom (convert @data-converter []))
+        this)
+       (success [this] @success-state)
+       (result [this] @result-state)
+       (json [this] @json-doc)
+       (get-atom [this] result-atom)
+       (<? [this] fetch-chan)
        )
      )
+
    )
   )
 

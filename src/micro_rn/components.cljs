@@ -41,14 +41,10 @@
 
 ; apis
 
-(defn blabla
-  [params]
-  )
-
 (defn alert
-  ([title] (.alert (.-Alert js/React) title))
-  ([title buttons] (.alert (.-Alert js/React) title buttons))
-  ([title buttons type] (.alert (.-Alert js/React) title buttons type)))
+  ([message] (.alert (.-Alert js/React) "Alert" message))
+  ([title message] (.alert (.-Alert js/React) title message nil))
+  ([title message buttons] (.alert (.-Alert js/React) title message (utils/prepare-to-js buttons))))
 
 (def AppRegistry (.-AppRegistry js/React))
 (def app-state (.-AppState js/React))
