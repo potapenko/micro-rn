@@ -201,8 +201,8 @@
   (let [port (chan)]
     (-> promise
         (.then (fn [res] (put! port [nil res]))
-              (fn [err] (put! port [err nil]))
-              ))
+               (fn [err] (put! port [err nil]))
+               ))
 
     port
     )

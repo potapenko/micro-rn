@@ -4,6 +4,7 @@
     [reagent.core :as r :refer [atom]]
     [reagent.impl.component :as ru]
     [micro-rn.styles :as s :refer [get-style new-style flex row column opacity background gray white red orange yellow olive green teal blue violet purple grey pink brown black rounded border height width align-center align-right padding margin padding-horizontal padding-vertical font-size bold color stretch position-absolute top left bottom right overflow shadow text-align text-shadow]]
+    [micro-rn.utils :as utils]
     )
   )
 
